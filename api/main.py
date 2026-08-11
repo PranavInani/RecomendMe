@@ -1,7 +1,9 @@
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from recommenders.content_based import ContentBasedRecommender
 from recommenders.collaborative import CollaborativeRecommender
@@ -16,10 +18,33 @@ from api.schemas import (
     UserHistoryResponse
 )
 
+content_recommender = None
+collab_recommender = None
+hybrid_recommender = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global content_recommender, collab_recommender, hybrid_recommender
+    print("[Startup] Initializing recommendation engines...")
+
+    data_dir = 'data/ml-latest-small'
+
+    content_recommender = ContentBasedRecommender(data_dir=data_dir)
+    content_recommender.fit()
+
+    collab_recommender = CollaborativeRecommender(data_dir=data_dir)
+    collab_recommender.movies_df = content_recommender.movies_df
+    collab_recommender.fit()
+
+    hybrid_recommender = HybridRecommender(content_recommender, collab_recommender)
+    print("[Startup] All recommendation engines online.")
+    yield
+
 app = FastAPI(
     title="Hybrid Movie Recommendation Engine",
     description="Full-stack recommendation engine combining Content-Based TF-IDF and SVD Collaborative Filtering.",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -30,29 +55,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-content_recommender = None
-collab_recommender = None
-hybrid_recommender = None
-
-@app.on_event("startup")
-def startup_event():
-    global content_recommender, collab_recommender, hybrid_recommender
-    print("[Startup] Initializing recommendation engines...")
-
-    data_dir = 'data/ml-latest-small'
-
-    # Initialize and fit Content-Based engine
-    content_recommender = ContentBasedRecommender(data_dir=data_dir)
-    content_recommender.fit()
-
-    # Initialize and fit Collaborative engine, sharing movies_df
-    collab_recommender = CollaborativeRecommender(data_dir=data_dir)
-    collab_recommender.movies_df = content_recommender.movies_df
-    collab_recommender.fit()
-
-    # Initialize Hybrid engine
-    hybrid_recommender = HybridRecommender(content_recommender, collab_recommender)
-    print("[Startup] All recommendation engines online and optimized.")
+# ── API routes ────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health_check():
@@ -127,6 +130,13 @@ def recommend_hybrid(req: HybridRecommendRequest):
         "recommendations": recs
     }
 
-# Serve static React frontend in production if dist directory exists
-if os.path.exists("frontend/dist"):
-    app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
+# ── Static frontend (mounted LAST so API routes take priority) ────────────────
+DIST_DIR = "frontend/dist"
+if os.path.exists(DIST_DIR):
+    # Serve static assets (JS, CSS, images)
+    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+
+    # Catch-all: serve index.html for all non-API routes (SPA routing)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str):
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
