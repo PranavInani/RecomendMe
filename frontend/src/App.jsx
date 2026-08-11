@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Sparkles, 
   Film, 
   Users, 
   Sliders, 
   Search, 
   Star, 
   BookOpen, 
-  Layers, 
   CheckCircle2, 
   Loader2, 
-  TrendingUp,
-  Cpu,
   Zap,
-  Info
+  Sun,
+  Moon
 } from 'lucide-react';
 import './App.css';
 
@@ -22,6 +19,22 @@ const API_BASE = '/api';
 export default function App() {
   const [activeTab, setActiveTab] = useState('hybrid'); // 'content', 'collaborative', 'hybrid', 'architecture'
   
+  // Theme state (light / dark)
+  const [theme, setTheme] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') || 
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    }
+    return 'light';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+
   // Search & Inputs
   const [searchQuery, setSearchQuery] = useState('Toy Story (1995)');
   const [selectedMovie, setSelectedMovie] = useState({ movieId: 1, title: 'Toy Story (1995)' });
@@ -46,7 +59,7 @@ export default function App() {
       .then(res => res.json())
       .then(data => {
         if (data.user_ids && data.user_ids.length > 0) {
-          setUsers(data.user_ids.slice(0, 50)); // top 50 users for dropdown
+          setUsers(data.user_ids.slice(0, 50));
         }
       })
       .catch(err => console.error("Error fetching users:", err));
@@ -99,7 +112,6 @@ export default function App() {
           top_n: topN
         };
       } else {
-        // Hybrid mode
         endpoint = `${API_BASE}/recommend/hybrid`;
         body = {
           movie_title: selectedMovie ? selectedMovie.title : searchQuery,
@@ -130,7 +142,7 @@ export default function App() {
     }
   };
 
-  // Trigger recommendations on tab load or initial render
+  // Trigger recommendations on tab load
   useEffect(() => {
     handleGetRecommendations();
   }, [activeTab]);
@@ -141,19 +153,27 @@ export default function App() {
       <header className="header-bar">
         <div className="logo-group">
           <div className="logo-icon">
-            <Sparkles size={24} />
+            <Film size={20} />
           </div>
           <div>
-            <h1 className="logo-title">
-              Recomend<span className="gradient-text">Me</span>
-            </h1>
-            <p className="logo-subtitle">Next-Gen Hybrid Recommendation Engine</p>
+            <h1 className="logo-title">RecomendMe</h1>
+            <p className="logo-subtitle">Movie Recommendations</p>
           </div>
         </div>
 
-        <div className="status-pill">
-          <div className="status-dot"></div>
-          <span>SVD + TF-IDF Hybrid Engine Online</span>
+        <div className="header-controls">
+          <div className="status-pill">
+            <div className="status-dot"></div>
+            <span>System Online</span>
+          </div>
+
+          <button 
+            className="theme-toggle" 
+            onClick={toggleTheme}
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
         </div>
       </header>
 
@@ -163,7 +183,7 @@ export default function App() {
           className={`tab-btn ${activeTab === 'content' ? 'active' : ''}`}
           onClick={() => setActiveTab('content')}
         >
-          <Film size={18} />
+          <Film size={16} />
           <span>Content-Based</span>
         </button>
 
@@ -171,15 +191,15 @@ export default function App() {
           className={`tab-btn ${activeTab === 'collaborative' ? 'active' : ''}`}
           onClick={() => setActiveTab('collaborative')}
         >
-          <Users size={18} />
-          <span>Collaborative (SVD)</span>
+          <Users size={16} />
+          <span>Collaborative</span>
         </button>
 
         <button 
           className={`tab-btn ${activeTab === 'hybrid' ? 'active' : ''}`}
           onClick={() => setActiveTab('hybrid')}
         >
-          <Zap size={18} />
+          <Zap size={16} />
           <span>Hybrid Fusion</span>
         </button>
 
@@ -187,7 +207,7 @@ export default function App() {
           className={`tab-btn ${activeTab === 'architecture' ? 'active' : ''}`}
           onClick={() => setActiveTab('architecture')}
         >
-          <BookOpen size={18} />
+          <BookOpen size={16} />
           <span>How It Works</span>
         </button>
       </nav>
@@ -196,21 +216,21 @@ export default function App() {
       {activeTab !== 'architecture' ? (
         <main className="main-content">
           {/* Controls Side Panel */}
-          <aside className="glass-panel control-panel">
+          <aside className="card control-panel">
             <h2 className="panel-title">
-              <Sliders size={20} className="gradient-text" />
-              <span>Config Engine</span>
+              <Sliders size={16} />
+              <span>Settings</span>
             </h2>
 
-            {/* Movie Title Input (for Content & Hybrid) */}
+            {/* Movie Title Input */}
             {(activeTab === 'content' || activeTab === 'hybrid') && (
               <div className="form-group">
                 <label className="form-label">
-                  <span>Seed Movie Title</span>
-                  <span className="badge badge-purple">TF-IDF</span>
+                  <span>Movie</span>
+                  <span className="tag">TF-IDF</span>
                 </label>
                 <div className="input-wrapper">
-                  <Search size={18} className="input-icon" />
+                  <Search size={16} className="input-icon" />
                   <input
                     type="text"
                     className="text-input"
@@ -249,15 +269,15 @@ export default function App() {
               </div>
             )}
 
-            {/* User ID Select (for Collaborative & Hybrid) */}
+            {/* User ID Select */}
             {(activeTab === 'collaborative' || activeTab === 'hybrid') && (
               <div className="form-group">
                 <label className="form-label">
-                  <span>Select User Profile</span>
-                  <span className="badge badge-cyan">SVD Factors</span>
+                  <span>User Profile</span>
+                  <span className="tag">SVD</span>
                 </label>
                 <div className="input-wrapper">
-                  <Users size={18} className="input-icon" />
+                  <Users size={16} className="input-icon" />
                   <select
                     className="select-input"
                     value={selectedUserId}
@@ -271,20 +291,20 @@ export default function App() {
 
                 {/* User History Teaser */}
                 {userHistory.length > 0 && (
-                  <div style={{ marginTop: '6px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>User #{selectedUserId} Loved: </span>
+                  <div style={{ marginTop: '4px', fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
+                    <span style={{ fontWeight: 500, color: 'var(--text-secondary)' }}>Loved: </span>
                     {userHistory.map(h => h.title.split(' (')[0]).slice(0, 2).join(', ')}
                   </div>
                 )}
               </div>
             )}
 
-            {/* Hybrid Alpha Weight Slider */}
+            {/* Hybrid Weight Slider */}
             {activeTab === 'hybrid' && (
               <div className="slider-container">
                 <div className="form-label">
-                  <span>Hybrid Weight Balance (α)</span>
-                  <span className="badge badge-amber">{Math.round(alpha * 100)}% Content / {Math.round((1 - alpha) * 100)}% Collab</span>
+                  <span>Content vs Collaborative</span>
+                  <span className="tag tag--accent">{Math.round(alpha * 100)}% / {Math.round((1 - alpha) * 100)}%</span>
                 </div>
                 <input
                   type="range"
@@ -296,8 +316,8 @@ export default function App() {
                   onChange={(e) => setAlpha(parseFloat(e.target.value))}
                 />
                 <div className="slider-labels">
-                  <span>← 100% SVD Rating</span>
-                  <span>100% TF-IDF Text →</span>
+                  <span>Collaborative (SVD)</span>
+                  <span>Content (Text)</span>
                 </div>
               </div>
             )}
@@ -307,7 +327,7 @@ export default function App() {
               <label className="form-label">Number of Results</label>
               <select
                 className="select-input"
-                style={{ paddingLeft: '14px' }}
+                style={{ paddingLeft: '12px' }}
                 value={topN}
                 onChange={(e) => setTopN(Number(e.target.value))}
               >
@@ -326,41 +346,32 @@ export default function App() {
             >
               {loading ? (
                 <>
-                  <Loader2 size={18} className="spin" />
-                  <span>Computing Vectors...</span>
+                  <Loader2 size={16} className="spin" />
+                  <span>Loading...</span>
                 </>
               ) : (
-                <>
-                  <Zap size={18} />
-                  <span>Generate Recommendations</span>
-                </>
+                <span>Get Recommendations</span>
               )}
             </button>
           </aside>
 
           {/* Results Grid Panel */}
           <section className="results-panel">
-            <div className="glass-panel results-header">
+            <div className="card results-header">
               <div className="results-title-group">
-                <TrendingUp size={22} className="gradient-text" />
-                <div>
-                  <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>
-                    {activeTab === 'content' && `Similar to "${selectedMovie ? selectedMovie.title : searchQuery}"`}
-                    {activeTab === 'collaborative' && `Personalized Predictions for User #${selectedUserId}`}
-                    {activeTab === 'hybrid' && `Hybrid Blended Results for User #${selectedUserId}`}
-                  </h2>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    Top ranked items generated in real-time
-                  </p>
-                </div>
+                <h2 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {activeTab === 'content' && `Similar to "${selectedMovie ? selectedMovie.title : searchQuery}"`}
+                  {activeTab === 'collaborative' && `Recommended for User #${selectedUserId}`}
+                  {activeTab === 'hybrid' && `Hybrid Recommendations for User #${selectedUserId}`}
+                </h2>
               </div>
-              <span className="badge badge-purple">
+              <span className="tag">
                 {recommendations.length} Results
               </span>
             </div>
 
             {error && (
-              <div className="glass-panel" style={{ padding: '20px', color: '#f87171', border: '1px solid rgba(248, 113, 113, 0.3)' }}>
+              <div className="card" style={{ padding: '16px', color: 'var(--error)', border: '1px solid var(--error)' }}>
                 {error}
               </div>
             )}
@@ -369,26 +380,26 @@ export default function App() {
             {recommendations.length > 0 ? (
               <div className="movie-grid">
                 {recommendations.map((item, idx) => (
-                  <article key={item.movieId || idx} className="glass-panel glass-panel-hover movie-card">
+                  <article key={item.movieId || idx} className="card movie-card">
                     <div className="card-header">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span className="badge badge-cyan">#{idx + 1}</span>
+                        <span className="tag">#{idx + 1}</span>
                         
-                        {item.similarity_score && (
-                          <span className="score-badge" style={{ color: '#a78bfa' }}>
-                            {Math.round(item.similarity_score * 100)}% Sim
+                        {item.similarity_score !== undefined && (
+                          <span className="score-badge">
+                            {Math.round(item.similarity_score * 100)}% match
                           </span>
                         )}
 
-                        {item.predicted_rating && (
-                          <span className="score-badge" style={{ color: '#38bdf8' }}>
-                            ★ {item.predicted_rating.toFixed(2)} Pred
+                        {item.predicted_rating !== undefined && (
+                          <span className="score-badge">
+                            ★ {item.predicted_rating.toFixed(1)} pred
                           </span>
                         )}
 
-                        {item.hybrid_score && (
-                          <span className="score-badge" style={{ color: '#34d399' }}>
-                            {(item.hybrid_score * 100).toFixed(1)} Hybrid
+                        {item.hybrid_score !== undefined && (
+                          <span className="score-badge">
+                            {Math.round(item.hybrid_score * 100)}% match
                           </span>
                         )}
                       </div>
@@ -397,7 +408,7 @@ export default function App() {
 
                       <div className="genres-wrapper">
                         {item.genres && item.genres.map((g, i) => (
-                          <span key={i} className="badge badge-purple" style={{ fontSize: '0.7rem' }}>
+                          <span key={i} className="tag" style={{ fontSize: '0.7rem' }}>
                             {g}
                           </span>
                         ))}
@@ -406,30 +417,24 @@ export default function App() {
 
                     <div className="card-metrics">
                       <div className="rating-info">
-                        <Star size={15} fill="currentColor" />
+                        <Star size={14} fill="currentColor" />
                         <span>{item.avg_rating ? item.avg_rating.toFixed(1) : 'N/A'}</span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                        <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem' }}>
                           ({item.rating_count || 0})
                         </span>
                       </div>
-
-                      {item.content_score !== undefined && item.collab_score !== undefined && (
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                          Txt: {Math.round(item.content_score * 100)}% | SVD: {Math.round(item.collab_score * 100)}%
-                        </div>
-                      )}
                     </div>
                   </article>
                 ))}
               </div>
             ) : (
               !loading && (
-                <div className="glass-panel empty-state">
+                <div className="card empty-state">
                   <div className="empty-icon">
-                    <Film size={32} />
+                    <Film size={24} />
                   </div>
-                  <h3>No Recommendations Yet</h3>
-                  <p>Select a seed movie or user profile on the left and click Generate!</p>
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>No Recommendations Yet</h3>
+                  <p style={{ fontSize: '0.8125rem' }}>Select a movie or user profile on the left and click Get Recommendations.</p>
                 </div>
               )
             )}
@@ -438,56 +443,56 @@ export default function App() {
       ) : (
         /* Explainer & Architecture View */
         <section className="explainer-grid">
-          <article className="glass-panel explainer-card">
-            <div className="explainer-icon" style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c084fc' }}>
-              <Film size={24} />
+          <article className="card explainer-card">
+            <div className="explainer-icon">
+              <Film size={20} />
             </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700 }}>1. Content-Based Filtering</h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Uses TF-IDF Vectorization on title, lemmatized tags, and genre matrices to construct movie feature vectors. Calculates Cosine Similarity between vectors to find items with similar metadata.
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>1. Content-Based Filtering</h3>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+              Uses TF-IDF Vectorization on movie titles, lemmatized tags, and genre matrices. Calculates Cosine Similarity between item feature vectors.
             </p>
-            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={16} color="#34d399" /> Cold-start friendly for new movies
+            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8125rem', color: 'var(--text-tertiary)' }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="var(--success)" /> Cold-start friendly for new movies
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={16} color="#34d399" /> Analyzes genres & NLTK lemmatized tags
+              <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="var(--success)" /> NLTK text processing
               </li>
             </ul>
           </article>
 
-          <article className="glass-panel explainer-card">
-            <div className="explainer-icon" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#38bdf8' }}>
-              <Users size={24} />
+          <article className="card explainer-card">
+            <div className="explainer-icon">
+              <Users size={20} />
             </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700 }}>2. SVD Collaborative Filtering</h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Decomposes the 100,000+ ratings user-item interaction matrix into low-rank latent feature vectors (50 factors) using Singular Value Decomposition (SVD). Predicts unobserved rating preferences.
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>2. SVD Collaborative Filtering</h3>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+              Decomposes the 100,000+ ratings user-item interaction matrix into 50 latent factors using Singular Value Decomposition (SVD).
             </p>
-            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={16} color="#34d399" /> Captures implicit user preference patterns
+            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8125rem', color: 'var(--text-tertiary)' }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="var(--success)" /> Captures implicit user preferences
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={16} color="#34d399" /> Matrix factorization via Surprise framework
+              <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="var(--success)" /> Matrix factorization via Surprise
               </li>
             </ul>
           </article>
 
-          <article className="glass-panel explainer-card">
-            <div className="explainer-icon" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6' }}>
-              <Zap size={24} />
+          <article className="card explainer-card">
+            <div className="explainer-icon">
+              <Zap size={20} />
             </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700 }}>3. Dynamic Hybrid Fusion</h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Combines normalized scores from both content-based similarity and SVD collaborative rating predictions: <code>score = α·Content + (1-α)·Collab</code>.
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>3. Dynamic Hybrid Fusion</h3>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+              Combines normalized scores from both content-based similarity and SVD rating predictions: <code>score = α·Content + (1-α)·Collab</code>.
             </p>
-            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={16} color="#34d399" /> Live weight tuning via interactive slider
+            <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8125rem', color: 'var(--text-tertiary)' }}>
+              <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="var(--success)" /> Live weight tuning via slider
               </li>
-              <li style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={16} color="#34d399" /> Best of both worlds accuracy & diversity
+              <li style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={14} color="var(--success)" /> Blends text similarity & rating trends
               </li>
             </ul>
           </article>
