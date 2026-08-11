@@ -6,16 +6,16 @@
 [![Vite](https://img.shields.io/badge/Vite-8.0-purple.svg)](https://vitejs.dev/)
 [![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-1.9-orange.svg)](https://scikit-learn.org/)
 
-**RecomendMe** is a full-stack, state-of-the-art hybrid recommendation system that combines **Content-Based Filtering (TF-IDF & Cosine Similarity)** with **Collaborative Filtering (SVD Matrix Factorization)** and serves them through a high-performance FastAPI backend and a modern React/Vite web application.
+**RecomendMe** is a full-stack, production-ready hybrid movie recommendation system that combines **Content-Based Filtering (TF-IDF & On-The-Fly Cosine Similarity)** with **Collaborative Filtering (SVD Matrix Factorization)**, served through a high-performance FastAPI backend and a clean, editorial React/Vite web application with Light/Dark mode.
 
 ---
 
 ## 🌟 Key Features
 
-- **🎯 Content-Based Filtering**:
+- **🎯 Content-Based Filtering (Memory-Optimized)**:
   - Analyzes movie titles, lemmatized tags (NLTK), and one-hot encoded genres.
-  - Constructs sparse feature matrices and computes cosine similarity for instant item-item recommendations.
-  - Precomputed disk caching (`data/content_cache.pkl`) for sub-100ms response times.
+  - Constructs a compact sparse CSR feature matrix (**0.97 MB RAM** vs 724 MB dense matrix).
+  - Computes single-row cosine similarity **on-the-fly per request (~1.3 ms)** for sub-10ms response times.
 
 - **👥 Collaborative Filtering (SVD)**:
   - Decomposes the user-item interaction matrix (100,000+ ratings from MovieLens Small) into 50 latent factors using **Singular Value Decomposition (SVD)**.
@@ -26,10 +26,13 @@
     $$\text{Hybrid Score} = \alpha \cdot \text{Content Score} + (1 - \alpha) \cdot \text{Collaborative Score}$$
   - Live interactive weight slider ($\alpha$) in the UI to tune the balance between metadata similarity and community preferences.
 
-- **✨ Glassmorphism UI & Web Application**:
-  - Live search autocomplete with genre pills and rating stats as you type.
-  - User profile selector with user history previews.
-  - Responsive, dark-themed glassmorphism interface built with React & Vite.
+- **🎨 Modern Editorial UI & Light/Dark Mode**:
+  - Clean, restrained product design (inspired by Linear & Notion) with a flat burnt-orange accent (`#e8590c`).
+  - Seamless Light Mode and Dark Mode theme toggle with system preference detection and state persistence.
+  - Live search autocomplete with genre tags and average rating stats.
+
+- **☁️ Cloud Free-Tier Ready (Render 512 MB RAM)**:
+  - Reduced overall server peak memory usage from **820 MB down to ~53 MB**, making it lightweight and deployable on free cloud tiers.
 
 ---
 
@@ -38,7 +41,7 @@
 ```
                                   ┌───────────────────────────┐
                                   │      React + Vite UI      │
-                                  │   (Glassmorphism Frontend)│
+                                  │  (Editorial + Light/Dark) │
                                   └─────────────┬─────────────┘
                                                 │ REST API
                                   ┌─────────────▼─────────────┐
@@ -47,15 +50,15 @@
                                          │              │
                     ┌────────────────────▼─┐          ┌─▼────────────────────┐
                     │ ContentRecommender   │          │ Collaborative Engine │
-                    │ (TF-IDF + Cosine Sim)│          │ (SVD Factorization)  │
+                    │(Sparse CSR + Row Sim)│          │ (SVD Factorization)  │
                     └──────────────────────┘          └──────────────────────┘
 ```
 
 | Component | Technology |
 |---|---|
 | **Backend API** | FastAPI, Uvicorn, Pydantic |
-| **Machine Learning** | Scikit-Learn, Scikit-Surprise, NLTK, Pandas, NumPy, SciPy |
-| **Frontend** | React, Vite, Lucide React, Vanilla CSS3 (Glassmorphism) |
+| **Machine Learning** | Scikit-Learn, Scikit-Surprise, NLTK, Pandas, NumPy, SciPy (Sparse CSR) |
+| **Frontend** | React, Vite, Lucide React, Vanilla CSS3 (Custom Theme Tokens) |
 | **Dataset** | MovieLens Small (`ml-latest-small`) |
 
 ---
@@ -66,7 +69,7 @@
 RecomendMe/
 ├── recommenders/
 │   ├── __init__.py
-│   ├── content_based.py       # TF-IDF + Lemmatization + Cosine Sim module
+│   ├── content_based.py       # TF-IDF + Lemmatization + Sparse Row Cosine Sim module
 │   ├── collaborative.py       # SVD Matrix Factorization module
 │   └── hybrid.py              # Dynamic score fusion engine
 ├── api/
@@ -75,13 +78,13 @@ RecomendMe/
 │   └── schemas.py             # Pydantic request/response schemas
 ├── data/
 │   ├── ml-latest-small/       # MovieLens CSV dataset (movies, ratings, tags)
-│   ├── content_cache.pkl      # Pre-calculated content similarity cache
-│   └── collab_cache.pkl       # Trained SVD model cache
+│   ├── content_cache.pkl      # Lightweight sparse feature cache (~1.5 MB)
+│   └── collab_cache.pkl       # Trained SVD model cache (~8 MB)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx            # Main React UI component
-│   │   ├── App.css            # Component styles
-│   │   └── index.css          # Design system & tokens
+│   │   ├── App.css            # Component layout styles
+│   │   └── index.css          # Design system & Light/Dark tokens
 │   ├── dist/                  # Production build directory
 │   ├── index.html
 │   └── package.json
@@ -168,14 +171,14 @@ Open **`http://localhost:8000`** in your web browser!
 
 ## 💡 How the Algorithms Work
 
-### 1. Content-Based Filtering
+### 1. Content-Based Filtering (Memory-Optimized)
 1. **Text Combination**: Concatenates movie title, lemmatized user tags, and genres.
-2. **TF-IDF & One-Hot Encoding**: Converts text features into a sparse Term Frequency-Inverse Document Frequency matrix and merges it with a one-hot encoded genres matrix.
-3. **Cosine Similarity**: Computes similarity scores between vectors:
+2. **Sparse TF-IDF & One-Hot Encoding**: Converts text features into a sparse Term Frequency-Inverse Document Frequency matrix and merges it with a one-hot encoded genres matrix, stored as a SciPy CSR matrix (`0.97 MB`).
+3. **On-the-Fly Cosine Similarity**: Computes similarity scores for the queried movie vector against the sparse feature matrix on-the-fly per request (`1.3 ms` compute time):
    $$\text{Cosine Sim}(A, B) = \frac{A \cdot B}{\|A\| \|B\|}$$
 
 ### 2. SVD Collaborative Filtering
-1. **Matrix Factorization**: Decomposes the user-rating matrix $R \approx P \cdot Q^T$, where $P$ is the user latent matrix and $Q$ is the item latent matrix.
+1. **Matrix Factorization**: Decomposes the user-rating matrix $R \approx P \cdot Q^T$, where $P$ is the user latent matrix and $Q$ is the item latent matrix (50 latent factors).
 2. **Rating Prediction**: Predicts unseen rating $\hat{r}_{u,i} = \mu + b_u + b_i + p_u^T q_i$.
 
 ### 3. Score Normalization & Fusion
