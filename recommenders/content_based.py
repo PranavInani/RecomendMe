@@ -2,12 +2,12 @@ import os
 import pickle
 import pandas as pd
 import numpy as np
+import re
+from scipy.sparse import hstack, csr_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from scipy.sparse import hstack
 import nltk
 from nltk.stem import WordNetLemmatizer
-from nltk.tokenize import word_tokenize
 
 # Download required NLTK resources
 for resource in ['punkt', 'wordnet', 'punkt_tab']:
@@ -17,10 +17,6 @@ for resource in ['punkt', 'wordnet', 'punkt_tab']:
         pass
 
 lemmatizer = WordNetLemmatizer()
-
-import re
-
-# Simple regex-based word splitting for speed
 TOKEN_RE = re.compile(r'\w+')
 
 def lemmatize_text(text: str) -> str:
@@ -29,17 +25,16 @@ def lemmatize_text(text: str) -> str:
     tokens = TOKEN_RE.findall(text)
     return ' '.join([lemmatizer.lemmatize(w) for w in tokens])
 
-
 class ContentBasedRecommender:
     def __init__(self, data_dir: str = 'data/ml-latest-small'):
         self.data_dir = data_dir
         self.movies_df = None
         self.ratings_df = None
         self.tags_df = None
-        self.cosine_sim = None
+        self.feature_matrix = None  # Sparse CSR matrix (0.97 MB RAM vs 724 MB dense cosine sim)
         self.case_insensitive_titles = []
         self.title_to_idx = {}
-        self.idx_to_movie = {}
+        self.movieId_to_idx = {}
 
     def load_data(self):
         movies_path = os.path.join(self.data_dir, 'movies.csv')
@@ -63,9 +58,9 @@ class ContentBasedRecommender:
                 with open(cache_path, 'rb') as f:
                     cached_data = pickle.load(f)
                     self.movies_df = cached_data['movies_df']
-                    self.cosine_sim = cached_data['cosine_sim']
+                    self.feature_matrix = cached_data['feature_matrix']
                     self._build_indexes()
-                    print("[ContentBased] Loaded precomputed model from cache.")
+                    print("[ContentBased] Loaded precomputed sparse feature model from cache (~2 MB RAM).")
                     return
             except Exception as e:
                 print(f"[ContentBased] Failed loading cache ({e}), recomputing...")
@@ -73,7 +68,7 @@ class ContentBasedRecommender:
         if self.movies_df is None:
             self.load_data()
 
-        print("[ContentBased] Building feature matrix...")
+        print("[ContentBased] Building sparse feature matrix...")
         # One-Hot Encoding for genres
         genres_onehot = self.movies_df['genres'].str.get_dummies()
 
@@ -100,15 +95,12 @@ class ContentBasedRecommender:
         tfidf = TfidfVectorizer(stop_words='english')
         tfidf_matrix = tfidf.fit_transform(df['text'])
 
-        # Combine TF-IDF matrix with one-hot encoded genres
-        combined_features = hstack([tfidf_matrix, genres_onehot])
-
-        # Cosine similarity matrix
-        print("[ContentBased] Computing cosine similarity matrix...")
-        self.cosine_sim = cosine_similarity(combined_features, combined_features)
+        # Combine TF-IDF matrix with one-hot encoded genres into CSR sparse matrix
+        combined_features = hstack([tfidf_matrix, genres_onehot]).tocsr()
+        self.feature_matrix = combined_features
 
         # Merge calculated mean rating into movies_df for rich output
-        if not self.ratings_df.empty:
+        if self.ratings_df is not None and not self.ratings_df.empty:
             stats = self.ratings_df.groupby('movieId').agg(
                 avg_rating=('rating', 'mean'),
                 rating_count=('rating', 'count')
@@ -124,7 +116,7 @@ class ContentBasedRecommender:
             with open(cache_path, 'wb') as f:
                 pickle.dump({
                     'movies_df': self.movies_df,
-                    'cosine_sim': self.cosine_sim
+                    'feature_matrix': self.feature_matrix
                 }, f)
             print(f"[ContentBased] Cache saved to {cache_path}")
 
@@ -156,7 +148,7 @@ class ContentBasedRecommender:
         return matches[:limit]
 
     def get_recommendations(self, movie_id: int = None, movie_title: str = None, top_n: int = 10):
-        if self.cosine_sim is None:
+        if self.feature_matrix is None:
             self.fit()
 
         idx = None
@@ -167,7 +159,6 @@ class ContentBasedRecommender:
             if title_lower in self.title_to_idx:
                 idx = self.title_to_idx[title_lower]
             else:
-                # Fuzzy fallback
                 matches = self.search_movies(movie_title, limit=1)
                 if matches:
                     idx = self.movieId_to_idx[matches[0]['movieId']]
@@ -175,12 +166,15 @@ class ContentBasedRecommender:
         if idx is None:
             return []
 
-        sim_scores = list(enumerate(self.cosine_sim[idx]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-        sim_scores = sim_scores[1:top_n + 1]  # Exclude self match
+        # ON-THE-FLY: Compute cosine similarity for single row vs all rows (1.3 ms, ~76 KB)
+        sim_scores_row = cosine_similarity(self.feature_matrix[idx:idx+1], self.feature_matrix)[0]
+
+        # Top-N indices descending (exclude self)
+        top_indices = np.argsort(sim_scores_row)[::-1][1:top_n + 1]
 
         recommendations = []
-        for i, score in sim_scores:
+        for i in top_indices:
+            score = sim_scores_row[i]
             row = self.movies_df.iloc[i]
             recommendations.append({
                 'movieId': int(row['movieId']),

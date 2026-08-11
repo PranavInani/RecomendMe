@@ -2,13 +2,16 @@ from recommenders.content_based import ContentBasedRecommender
 from recommenders.collaborative import CollaborativeRecommender
 
 class HybridRecommender:
-    def __init__(self, data_dir: str = 'data/ml-latest-small'):
-        self.cb = ContentBasedRecommender(data_dir=data_dir)
-        self.cf = CollaborativeRecommender(data_dir=data_dir)
+    def __init__(self, cb: ContentBasedRecommender = None, cf: CollaborativeRecommender = None, data_dir: str = 'data/ml-latest-small'):
+        self.data_dir = data_dir
+        self.cb = cb if cb is not None else ContentBasedRecommender(data_dir=data_dir)
+        self.cf = cf if cf is not None else CollaborativeRecommender(data_dir=data_dir)
 
     def fit(self):
-        self.cb.fit()
-        self.cf.fit()
+        if self.cb.feature_matrix is None:
+            self.cb.fit()
+        if self.cf.model is None:
+            self.cf.fit()
 
     def get_recommendations(
         self,

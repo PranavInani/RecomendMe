@@ -2,163 +2,132 @@ import os
 import pickle
 import pandas as pd
 import numpy as np
-
-try:
-    from surprise import Dataset, Reader, SVD
-    HAS_SURPRISE = True
-except ImportError:
-    HAS_SURPRISE = False
+from surprise import Dataset, Reader, SVD
 
 class CollaborativeRecommender:
     def __init__(self, data_dir: str = 'data/ml-latest-small'):
         self.data_dir = data_dir
-        self.ratings_df = None
         self.movies_df = None
-        self.svd_model = None
-        self.user_ids = []
-        self.movie_ids = []
-        self.movie_dict = {}
+        self.model = None
+        self.user_rated_movies = {}  # userId -> set of movieIds rated
+        self.user_history_map = {}   # userId -> list of history dicts
+        self.all_user_ids = []
+        self.all_movie_ids = []
 
     def load_data(self):
         movies_path = os.path.join(self.data_dir, 'movies.csv')
         ratings_path = os.path.join(self.data_dir, 'ratings.csv')
 
-        self.movies_df = pd.read_csv(movies_path)
-        self.ratings_df = pd.read_csv(ratings_path)
+        if self.movies_df is None:
+            self.movies_df = pd.read_csv(movies_path)
+        
+        ratings_df = pd.read_csv(ratings_path)
+        return ratings_df
 
-        # Build movie dict for fast metadata lookup
-        for _, row in self.movies_df.iterrows():
-            self.movie_dict[int(row['movieId'])] = {
-                'title': row['title'],
-                'genres': row['genres'].split('|') if pd.notna(row['genres']) else []
-            }
-
-        # Calculate average ratings
-        stats = self.ratings_df.groupby('movieId').agg(
-            avg_rating=('rating', 'mean'),
-            rating_count=('rating', 'count')
-        ).to_dict('index')
-
-        for mid, data in self.movie_dict.items():
-            st = stats.get(mid, {'avg_rating': 0.0, 'rating_count': 0})
-            data['avg_rating'] = round(float(st['avg_rating']), 2)
-            data['rating_count'] = int(st['rating_count'])
-
-        self.user_ids = sorted(self.ratings_df['userId'].unique().tolist())
-        self.movie_ids = sorted(self.movies_df['movieId'].unique().tolist())
-
-    def fit(self, save_cache: bool = True, cache_path: str = 'data/collab_cache.pkl'):
+    def fit(self, n_factors: int = 50, n_epochs: int = 20, save_cache: bool = True, cache_path: str = 'data/collab_cache.pkl'):
         if save_cache and os.path.exists(cache_path):
             try:
                 with open(cache_path, 'rb') as f:
-                    cached_data = pickle.load(f)
-                    self.svd_model = cached_data['svd_model']
-                    self.movies_df = cached_data['movies_df']
-                    self.ratings_df = cached_data['ratings_df']
-                    self.movie_dict = cached_data['movie_dict']
-                    self.user_ids = cached_data['user_ids']
-                    self.movie_ids = cached_data['movie_ids']
-                    print("[Collaborative] Loaded precomputed SVD model from cache.")
+                    cached = pickle.load(f)
+                    self.model = cached['model']
+                    self.user_rated_movies = cached['user_rated_movies']
+                    self.user_history_map = cached['user_history_map']
+                    self.all_user_ids = cached['all_user_ids']
+                    self.all_movie_ids = cached['all_movie_ids']
+                    if 'movies_df' in cached and self.movies_df is None:
+                        self.movies_df = cached['movies_df']
+                    print("[Collaborative] Loaded trained SVD model from cache.")
                     return
             except Exception as e:
-                print(f"[Collaborative] Failed loading cache ({e}), recomputing...")
-
-        if self.ratings_df is None:
-            self.load_data()
+                print(f"[Collaborative] Failed loading cache ({e}), retraining...")
 
         print("[Collaborative] Training SVD Matrix Factorization model...")
+        ratings_df = self.load_data()
 
-        if HAS_SURPRISE:
-            reader = Reader(rating_scale=(0.5, 5.0))
-            data = Dataset.load_from_df(self.ratings_df[['userId', 'movieId', 'rating']], reader)
-            trainset = data.build_full_trainset()
+        # Compute user rated sets & compact history dict
+        self.user_rated_movies = ratings_df.groupby('userId')['movieId'].apply(set).to_dict()
+        
+        # Compact top history per user
+        user_history_map = {}
+        merged_history = pd.merge(ratings_df, self.movies_df[['movieId', 'title', 'genres']], on='movieId', how='left')
+        for user_id, group in merged_history.groupby('userId'):
+            top_rated = group.sort_values('rating', ascending=False).head(10)
+            user_history_map[int(user_id)] = [
+                {
+                    'movieId': int(row['movieId']),
+                    'title': row['title'],
+                    'genres': row['genres'].split('|') if pd.notna(row['genres']) else [],
+                    'rating': float(row['rating'])
+                }
+                for _, row in top_rated.iterrows()
+            ]
+        self.user_history_map = user_history_map
 
-            # Train SVD with 50 factors
-            self.svd_model = SVD(n_factors=50, n_epochs=25, lr_all=0.005, reg_all=0.02, random_state=42)
-            self.svd_model.fit(trainset)
-        else:
-            print("[Collaborative] scikit-surprise not found, skipping SVD.")
+        self.all_user_ids = sorted(ratings_df['userId'].unique().tolist())
+        self.all_movie_ids = sorted(self.movies_df['movieId'].unique().tolist())
+
+        # Fit SVD
+        reader = Reader(rating_scale=(0.5, 5.0))
+        data = Dataset.load_from_df(ratings_df[['userId', 'movieId', 'rating']], reader)
+        trainset = data.build_full_trainset()
+
+        self.model = SVD(n_factors=n_factors, n_epochs=n_epochs, random_state=42)
+        self.model.fit(trainset)
 
         if save_cache:
             os.makedirs(os.path.dirname(cache_path), exist_ok=True)
             with open(cache_path, 'wb') as f:
                 pickle.dump({
-                    'svd_model': self.svd_model,
-                    'movies_df': self.movies_df,
-                    'ratings_df': self.ratings_df,
-                    'movie_dict': self.movie_dict,
-                    'user_ids': self.user_ids,
-                    'movie_ids': self.movie_ids
+                    'model': self.model,
+                    'user_rated_movies': self.user_rated_movies,
+                    'user_history_map': self.user_history_map,
+                    'all_user_ids': self.all_user_ids,
+                    'all_movie_ids': self.all_movie_ids,
+                    'movies_df': self.movies_df
                 }, f)
             print(f"[Collaborative] Cache saved to {cache_path}")
 
-    def get_user_history(self, user_id: int, top_n: int = 10):
-        if self.ratings_df is None:
-            self.load_data()
+    def get_users(self):
+        return self.all_user_ids
 
-        user_ratings = self.ratings_df[self.ratings_df['userId'] == user_id]
-        if user_ratings.empty:
-            return []
-
-        top_user_ratings = user_ratings.sort_values(by=['rating', 'timestamp'], ascending=[False, False]).head(top_n)
-
-        history = []
-        for _, row in top_user_ratings.iterrows():
-            mid = int(row['movieId'])
-            meta = self.movie_dict.get(mid, {'title': f'Movie {mid}', 'genres': [], 'avg_rating': 0, 'rating_count': 0})
-            history.append({
-                'movieId': mid,
-                'title': meta['title'],
-                'genres': meta['genres'],
-                'user_rating': float(row['rating']),
-                'avg_rating': meta['avg_rating'],
-                'rating_count': meta['rating_count']
-            })
-        return history
+    def get_user_history(self, user_id: int, limit: int = 5):
+        if user_id in self.user_history_map:
+            return self.user_history_map[user_id][:limit]
+        return []
 
     def recommend_for_user(self, user_id: int, top_n: int = 10):
-        if self.svd_model is None:
+        if self.model is None:
             self.fit()
 
-        if user_id not in self.user_ids:
-            # Fallback to overall top rated movies for unknown users
-            top_movies = self.movies_df.sort_values(by=['avg_rating', 'rating_count'], ascending=[False, False]).head(top_n)
-            results = []
-            for _, row in top_movies.iterrows():
-                results.append({
-                    'movieId': int(row['movieId']),
-                    'title': row['title'],
-                    'genres': row['genres'].split('|') if pd.notna(row['genres']) else [],
-                    'predicted_rating': 4.0,
-                    'avg_rating': float(row.get('avg_rating', 0)),
-                    'rating_count': int(row.get('rating_count', 0))
-                })
-            return results
+        rated_movies = self.user_rated_movies.get(user_id, set())
 
-        # Get movies user has already rated
-        rated_movie_ids = set(self.ratings_df[self.ratings_df['userId'] == user_id]['movieId'])
+        # Unrated movies for this user
+        unrated = [m for m in self.all_movie_ids if m not in rated_movies]
 
-        # Predict ratings for all unrated movies
         predictions = []
-        for mid in self.movie_ids:
-            if mid not in rated_movie_ids:
-                pred = self.svd_model.predict(user_id, mid)
-                predictions.append((mid, pred.est))
+        for movie_id in unrated:
+            pred = self.model.predict(user_id, movie_id)
+            predictions.append((movie_id, pred.est))
 
-        # Sort predictions descending
+        # Sort by predicted rating descending
         predictions.sort(key=lambda x: x[1], reverse=True)
-        top_predictions = predictions[:top_n]
+        top_preds = predictions[:top_n]
+
+        # Build output dicts
+        movie_dict = self.movies_df.set_index('movieId').to_dict('index')
 
         recommendations = []
-        for mid, est_rating in top_predictions:
-            meta = self.movie_dict.get(mid, {'title': f'Movie {mid}', 'genres': [], 'avg_rating': 0, 'rating_count': 0})
+        for movie_id, est_rating in top_preds:
+            meta = movie_dict.get(movie_id, {})
+            genres = meta.get('genres', '')
+            genres_list = genres.split('|') if pd.notna(genres) and genres else []
             recommendations.append({
-                'movieId': mid,
-                'title': meta['title'],
-                'genres': meta['genres'],
+                'movieId': int(movie_id),
+                'title': meta.get('title', f'Movie #{movie_id}'),
+                'genres': genres_list,
                 'predicted_rating': round(float(est_rating), 2),
-                'avg_rating': meta['avg_rating'],
-                'rating_count': meta['rating_count']
+                'avg_rating': float(meta.get('avg_rating', 0.0)) if pd.notna(meta.get('avg_rating')) else 0.0,
+                'rating_count': int(meta.get('rating_count', 0)) if pd.notna(meta.get('rating_count')) else 0
             })
 
         return recommendations

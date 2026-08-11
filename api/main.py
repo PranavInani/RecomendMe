@@ -1,12 +1,7 @@
 import os
-import sys
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-# Ensure project root is in sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from recommenders.content_based import ContentBasedRecommender
 from recommenders.collaborative import CollaborativeRecommender
@@ -15,16 +10,18 @@ from api.schemas import (
     ContentRecommendRequest,
     CollabRecommendRequest,
     HybridRecommendRequest,
-    MovieSearchResult
+    RecommendationResponse,
+    MovieSearchResponse,
+    UserListResponse,
+    UserHistoryResponse
 )
 
 app = FastAPI(
-    title="RecomendMe API",
-    description="Hybrid Movie Recommendation Engine (Content-Based + Collaborative SVD)",
+    title="Hybrid Movie Recommendation Engine",
+    description="Full-stack recommendation engine combining Content-Based TF-IDF and SVD Collaborative Filtering.",
     version="1.0.0"
 )
 
-# Enable CORS for local development & frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,7 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global recommender instances
 content_recommender = None
 collab_recommender = None
 hybrid_recommender = None
@@ -41,105 +37,96 @@ hybrid_recommender = None
 @app.on_event("startup")
 def startup_event():
     global content_recommender, collab_recommender, hybrid_recommender
-    print("[API Startup] Initializing models...")
-    content_recommender = ContentBasedRecommender()
+    print("[Startup] Initializing recommendation engines...")
+
+    data_dir = 'data/ml-latest-small'
+
+    # Initialize and fit Content-Based engine
+    content_recommender = ContentBasedRecommender(data_dir=data_dir)
     content_recommender.fit()
 
-    collab_recommender = CollaborativeRecommender()
+    # Initialize and fit Collaborative engine, sharing movies_df
+    collab_recommender = CollaborativeRecommender(data_dir=data_dir)
+    collab_recommender.movies_df = content_recommender.movies_df
     collab_recommender.fit()
 
-    hybrid_recommender = HybridRecommender()
-    hybrid_recommender.cb = content_recommender
-    hybrid_recommender.cf = collab_recommender
-    print("[API Startup] All models initialized successfully!")
+    # Initialize Hybrid engine
+    hybrid_recommender = HybridRecommender(content_recommender, collab_recommender)
+    print("[Startup] All recommendation engines online and optimized.")
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "message": "RecomendMe API is online"}
+    return {"status": "ok", "message": "Recommendation engine is operational."}
 
-@app.get("/api/movies/search")
+@app.get("/api/movies/search", response_model=list[MovieSearchResponse])
 def search_movies(q: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=50)):
     if not content_recommender:
-        raise HTTPException(status_code=503, detail="Models initializing...")
-    return content_recommender.search_movies(query=q, limit=limit)
+        raise HTTPException(status_code=503, detail="Recommender engine initializing")
+    return content_recommender.search_movies(q, limit=limit)
 
-@app.get("/api/users")
+@app.get("/api/users", response_model=UserListResponse)
 def get_users():
     if not collab_recommender:
-        raise HTTPException(status_code=503, detail="Models initializing...")
-    return {
-        "user_ids": collab_recommender.user_ids,
-        "total_users": len(collab_recommender.user_ids)
-    }
+        raise HTTPException(status_code=503, detail="Recommender engine initializing")
+    users = collab_recommender.get_users()
+    return {"user_ids": users, "total_count": len(users)}
 
-@app.get("/api/users/{user_id}/history")
-def get_user_history(user_id: int, limit: int = Query(10, ge=1, le=50)):
+@app.get("/api/users/{user_id}/history", response_model=UserHistoryResponse)
+def get_user_history(user_id: int, limit: int = Query(5, ge=1, le=20)):
     if not collab_recommender:
-        raise HTTPException(status_code=503, detail="Models initializing...")
-    history = collab_recommender.get_user_history(user_id=user_id, top_n=limit)
+        raise HTTPException(status_code=503, detail="Recommender engine initializing")
+    history = collab_recommender.get_user_history(user_id, limit=limit)
     return {"user_id": user_id, "history": history}
 
-@app.post("/api/recommend/content")
+@app.post("/api/recommend/content", response_model=RecommendationResponse)
 def recommend_content(req: ContentRecommendRequest):
     if not content_recommender:
-        raise HTTPException(status_code=503, detail="Models initializing...")
-
+        raise HTTPException(status_code=503, detail="Recommender engine initializing")
     recs = content_recommender.get_recommendations(
         movie_id=req.movie_id,
         movie_title=req.movie_title,
         top_n=req.top_n
     )
+    if not recs:
+        raise HTTPException(status_code=404, detail="Movie not found or no recommendations available.")
     return {
-        "type": "content_based",
-        "movie_id": req.movie_id,
-        "movie_title": req.movie_title,
+        "mode": "content-based",
+        "seed": req.movie_title or str(req.movie_id),
         "recommendations": recs
     }
 
-@app.post("/api/recommend/collaborative")
+@app.post("/api/recommend/collaborative", response_model=RecommendationResponse)
 def recommend_collaborative(req: CollabRecommendRequest):
     if not collab_recommender:
-        raise HTTPException(status_code=503, detail="Models initializing...")
-
+        raise HTTPException(status_code=503, detail="Recommender engine initializing")
     recs = collab_recommender.recommend_for_user(
         user_id=req.user_id,
         top_n=req.top_n
     )
     return {
-        "type": "collaborative",
+        "mode": "collaborative",
         "user_id": req.user_id,
         "recommendations": recs
     }
 
-@app.post("/api/recommend/hybrid")
+@app.post("/api/recommend/hybrid", response_model=RecommendationResponse)
 def recommend_hybrid(req: HybridRecommendRequest):
     if not hybrid_recommender:
-        raise HTTPException(status_code=503, detail="Models initializing...")
-
+        raise HTTPException(status_code=503, detail="Recommender engine initializing")
     recs = hybrid_recommender.get_recommendations(
+        user_id=req.user_id,
         movie_id=req.movie_id,
         movie_title=req.movie_title,
-        user_id=req.user_id,
         alpha=req.alpha,
         top_n=req.top_n
     )
     return {
-        "type": "hybrid",
-        "movie_id": req.movie_id,
-        "movie_title": req.movie_title,
+        "mode": "hybrid",
         "user_id": req.user_id,
         "alpha": req.alpha,
         "recommendations": recs
     }
 
-# Serve frontend static files if built
-frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), '../frontend/dist'))
-if os.path.exists(frontend_dist):
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="static")
-
-    @app.get("/{full_path:path}")
-    def serve_react_app(full_path: str):
-        file_path = os.path.join(frontend_dist, full_path)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
+# Serve static React frontend in production if dist directory exists
+if os.path.exists("frontend/dist"):
+    app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
